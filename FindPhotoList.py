@@ -1,6 +1,8 @@
 import os
 import json
 import requests
+from http.client import IncompleteRead
+import time
 
 class FindPhotoList:
     def __init__(self):
@@ -55,26 +57,41 @@ class FindPhotoList:
                 self.completed.add(photo["path"])  # 将新的文件路径加入已完成的列表
                 self.save_completed()  # 保存已完成的列表
 
-    def crawler(self, URL):
-        try:
-            response = requests.get(URL, headers=self.headers)
-            print(f"ID:{self.i_num}\tStatus:{response.status_code}")
-            self.i_num += 1  # 每次成功请求后递增计数器
-            response.raise_for_status()  # 检查请求是否成功
-            data = response.json()
+    def crawler(self, URL, retries=3, timeout=30):
+        """
+        爬虫请求函数，增加了重试机制，处理IncompleteRead错误，并设置了超时时间。
+        :param URL: 请求的URL
+        :param retries: 最大重试次数
+        :param timeout: 请求超时时间
+        :return: 返回光标以便获取下一页
+        """
+        for attempt in range(retries):
+            try:
+                response = requests.get(URL, headers=self.headers, timeout=timeout)
+                print(f"ID:{self.i_num}\tStatus:{response.status_code}")
+                self.i_num += 1  # 每次成功请求后递增计数器
+                response.raise_for_status()  # 检查请求是否成功
+                data = response.json()
 
-            photo_list = data.get("list", [])
-            if not photo_list:  # 爬取完毕
-                self.flag = False
-                return
-            self.save_json(photo_list)
+                photo_list = data.get("list", [])
+                if not photo_list:  # 爬取完毕
+                    self.flag = False
+                    return
+                self.save_json(photo_list)
 
-            cursor = data.get("cursor")
-            return cursor
-        except requests.exceptions.RequestException as e:
-            print(f"请求失败: {e}")
-            self.flag = False
-            return None
+                cursor = data.get("cursor")
+                return cursor
+
+            except IncompleteRead as e:
+                print(f"IncompleteRead 错误: {e}. 正在重试 {attempt + 1}/{retries} ...")
+                time.sleep(5)  # 等待 5 秒后重试
+
+            except requests.exceptions.RequestException as e:
+                print(f"请求失败: {e}. 正在重试 {attempt + 1}/{retries} ...")
+                time.sleep(5)  # 等待 5 秒后重试
+
+        self.flag = False
+        return None
 
     def func(self):
         URL = f"https://photo.baidu.com/youai/file/v1/list?clienttype={self.clienttype}&bdstoken={self.bdstoken}&need_thumbnail={self.need_thumbnail}&need_filter_hidden={self.need_filter_hidden}"
